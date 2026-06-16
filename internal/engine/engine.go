@@ -11,22 +11,24 @@ import (
 )
 
 type AgentEngine struct {
-	provider provider.LLMProvider
-	registry tools.Registry
-
-	WorkDir string
+	provider       provider.LLMProvider
+	registry       tools.Registry
+	WorkDir        string
+	EnableThinking bool
 }
 
-func NewAgentEngine(provider provider.LLMProvider, registry tools.Registry, workDir string) *AgentEngine {
+func NewAgentEngine(provider provider.LLMProvider, registry tools.Registry, workDir string, enableThinking bool) *AgentEngine {
 	return &AgentEngine{
-		provider: provider,
-		registry: registry,
-		WorkDir:  workDir,
+		provider:       provider,
+		registry:       registry,
+		WorkDir:        workDir,
+		EnableThinking: enableThinking,
 	}
 }
 
 func (e *AgentEngine) Run(ctx context.Context, userPrompt string) error {
 	log.Printf("[Engine] 引擎启动，锁定工作区: %s\n", e.WorkDir)
+	log.Printf("[Engine] 慢思考模式: %v\n", e.EnableThinking)
 
 	contextHistory := []schema.Message{
 		{
@@ -49,27 +51,41 @@ func (e *AgentEngine) Run(ctx context.Context, userPrompt string) error {
 		availableTools := e.registry.GetAvailableTools()
 
 		//向大模型发起推理请求
-		log.Printf("[Engine] 正在思考 (Reasoning)...")
-		responseMsg, err := e.provider.Generate(ctx, contextHistory, availableTools)
+		if e.EnableThinking {
+			log.Printf("[Engine][Phase 1] 剥夺工具使用权，进入慢思考与规划阶段")
+
+			thinkResp, err := e.provider.Generate(ctx, contextHistory, nil)
+			if err != nil {
+				return fmt.Errorf("Thinking failed: %v", err)
+			}
+
+			if thinkResp.Content != "" {
+				fmt.Printf("[🧠内部思考 Trace] %s\n", thinkResp.Content)
+				contextHistory = append(contextHistory, *thinkResp)
+			}
+
+		}
+		log.Printf("[Engine][Phase-2] 恢复工具挂载，等待模型行动...")
+		actionResp, err := e.provider.Generate(ctx, contextHistory, availableTools)
 		if err != nil {
-			return fmt.Errorf("模型调用失败: %w", err)
+			return fmt.Errorf("Action阶段生成失败: %w", err)
 		}
 
-		contextHistory = append(contextHistory, *responseMsg)
+		contextHistory = append(contextHistory, *actionResp)
 
-		if responseMsg.Content != "" {
-			log.Printf("模型: %s", responseMsg.Content)
+		if actionResp.Content != "" {
+			log.Printf("[对外回复]: %s", actionResp.Content)
 		}
 
 		//退出条件判断：没有请求任何工具
-		if len(responseMsg.ToolCalls) == 0 {
+		if len(actionResp.ToolCalls) == 0 {
 			log.Printf("[Engine] 任务完成，退出循环")
 			break
 		}
 
-		log.Printf("[Engine] 模型请求调用 %d 个工具...\n", len(responseMsg.ToolCalls))
+		log.Printf("[Engine] 模型请求调用 %d 个工具...\n", len(actionResp.ToolCalls))
 
-		for _, toolCall := range responseMsg.ToolCalls {
+		for _, toolCall := range actionResp.ToolCalls {
 			log.Printf(" -> 🛠执行工具： %s, 参数: %s\n", toolCall.Name, string(toolCall.Arguments))
 
 			result := e.registry.Execute(ctx, toolCall)
