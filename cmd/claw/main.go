@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/Constant2502/constant-tiny-claw/internal/engine"
+	"github.com/Constant2502/constant-tiny-claw/internal/provider"
 	"github.com/Constant2502/constant-tiny-claw/internal/schema"
 )
 
@@ -33,26 +34,50 @@ func (m *mockProvider) Generate(ctx context.Context, msgs []schema.Message, _ []
 
 type mockRegistry struct{}
 
-func (m *mockRegistry) GetAvailableTools() []schema.ToolDefinition { return nil }
+func (m *mockRegistry) GetAvailableTools() []schema.ToolDefinition {
+	return []schema.ToolDefinition{
+		{
+			Name:        "get_weather",
+			Description: "获取当前指定城市天气状况",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"city": map[string]interface{}{
+						"type": "string",
+					},
+				},
+				"required": []string{"city"},
+			},
+		},
+	}
+}
 
 func (m *mockRegistry) Execute(ctx context.Context, call schema.ToolCall) schema.ToolResult {
+	log.Printf(" -> [Mock工具执行]获取 %s 的天气中....\n", call.Name)
 	return schema.ToolResult{
 		ToolCallID: call.ID,
-		Output:     "-rw-r--r-- 1 user group 234 Oct 24 10:00 main.go\n",
+		Output:     "API返回：今天是晴天气温二十五度。",
 		IsError:    false,
 	}
 }
 
 func main() {
+	if os.Getenv("ZHIPU_API_KEY") == "" {
+		log.Fatal("请先导入智谱API的环境变量")
+	}
+
 	workDir, _ := os.Getwd()
 
-	p := &mockProvider{}
-	r := &mockRegistry{}
+	llmProvider := provider.NewZhipuOpenAIProvider("glm-4.5-air")
 
-	eng := engine.NewAgentEngine(p, r, workDir)
+	registry := &mockRegistry{}
 
-	err := eng.Run(context.Background(), "检查当前目录")
+	eng := engine.NewAgentEngine(llmProvider, registry, workDir, false)
+
+	prompt := "想去深圳跑步，帮我查查天气合适吗？"
+
+	err := eng.Run(context.Background(), prompt)
 	if err != nil {
-		log.Fatalf("engine crashed: %v", err)
+		log.Fatal(err)
 	}
 }

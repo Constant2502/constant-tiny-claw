@@ -60,12 +60,12 @@ func (e *AgentEngine) Run(ctx context.Context, userPrompt string) error {
 			}
 
 			if thinkResp.Content != "" {
-				fmt.Printf("[🧠内部思考 Trace] %s\n", thinkResp.Content)
+				log.Printf("[内部思考 Trace] %s", thinkResp.Content)
 				contextHistory = append(contextHistory, *thinkResp)
 			}
 
 		}
-		log.Printf("[Engine][Phase-2] 恢复工具挂载，等待模型行动...")
+		log.Printf("[Engine][Phase 2] 恢复工具挂载，等待模型行动...")
 		actionResp, err := e.provider.Generate(ctx, contextHistory, availableTools)
 		if err != nil {
 			return fmt.Errorf("Action阶段生成失败: %w", err)
