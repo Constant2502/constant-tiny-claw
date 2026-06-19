@@ -78,14 +78,19 @@ func main() {
 	readFileTool := tools.NewReadFileTool(workDir)
 	writeFileTool := tools.NewWriteFileTool(workDir)
 	bashTool := tools.NewBashTool(workDir)
+	editFileTool := tools.NewEditFileTool(workDir)
 
 	registry.Register(readFileTool)
 	registry.Register(writeFileTool)
 	registry.Register(bashTool)
+	registry.Register(editFileTool)
 
 	eng := engine.NewAgentEngine(llmProvider, registry, workDir, false)
 
-	prompt := "用bash查看当前go版本"
+	prompt := ` 我当前目录下有一个 server.go 文件。 
+				请帮我把里面 "TODO: 增加鉴权逻辑" 下面的那个 if 语句，
+				整个替换为： if user == nil { fmt.Println("Forbidden!") return } 
+				`
 
 	err := eng.Run(context.Background(), prompt)
 	if err != nil {
