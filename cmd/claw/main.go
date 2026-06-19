@@ -76,12 +76,16 @@ func main() {
 	registry := tools.NewRegistry()
 
 	readFileTool := tools.NewReadFileTool(workDir)
+	writeFileTool := tools.NewWriteFileTool(workDir)
+	bashTool := tools.NewBashTool(workDir)
 
 	registry.Register(readFileTool)
+	registry.Register(writeFileTool)
+	registry.Register(bashTool)
 
 	eng := engine.NewAgentEngine(llmProvider, registry, workDir, false)
 
-	prompt := "请读取项目中的README.md"
+	prompt := "用bash查看当前go版本"
 
 	err := eng.Run(context.Background(), prompt)
 	if err != nil {
