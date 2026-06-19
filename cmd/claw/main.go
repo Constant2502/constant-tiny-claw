@@ -8,6 +8,8 @@ import (
 	"github.com/Constant2502/constant-tiny-claw/internal/engine"
 	"github.com/Constant2502/constant-tiny-claw/internal/provider"
 	"github.com/Constant2502/constant-tiny-claw/internal/schema"
+	"github.com/Constant2502/constant-tiny-claw/internal/tools"
+	"github.com/joho/godotenv"
 )
 
 type mockProvider struct {
@@ -62,6 +64,7 @@ func (m *mockRegistry) Execute(ctx context.Context, call schema.ToolCall) schema
 }
 
 func main() {
+	_ = godotenv.Load()
 	if os.Getenv("ZHIPU_API_KEY") == "" {
 		log.Fatal("请先导入智谱API的环境变量")
 	}
@@ -70,11 +73,15 @@ func main() {
 
 	llmProvider := provider.NewZhipuOpenAIProvider("glm-4.5-air")
 
-	registry := &mockRegistry{}
+	registry := tools.NewRegistry()
+
+	readFileTool := tools.NewReadFileTool(workDir)
+
+	registry.Register(readFileTool)
 
 	eng := engine.NewAgentEngine(llmProvider, registry, workDir, false)
 
-	prompt := "想去深圳跑步，帮我查查天气合适吗？"
+	prompt := "请读取项目中的README.md"
 
 	err := eng.Run(context.Background(), prompt)
 	if err != nil {
