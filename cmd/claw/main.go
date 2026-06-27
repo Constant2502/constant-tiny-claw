@@ -3,16 +3,13 @@ package main
 import (
 	"context"
 	"log"
-	"net/http"
 	"os"
 
 	"github.com/Constant2502/constant-tiny-claw/internal/engine"
-	"github.com/Constant2502/constant-tiny-claw/internal/feishu"
 	"github.com/Constant2502/constant-tiny-claw/internal/provider"
 	"github.com/Constant2502/constant-tiny-claw/internal/schema"
 	"github.com/Constant2502/constant-tiny-claw/internal/tools"
 	"github.com/joho/godotenv"
-	"github.com/larksuite/oapi-sdk-go/v3/core/httpserverext"
 )
 
 type mockProvider struct {
@@ -88,18 +85,27 @@ func main() {
 	registry.Register(bashTool)
 	registry.Register(editFileTool)
 
-	eng := engine.NewAgentEngine(llmProvider, registry, workDir, false)
+	eng := engine.NewAgentEngine(llmProvider, registry, workDir, true)
 
-	bot := feishu.NewFeishuBot(eng)
-	handler := httpserverext.NewEventHandlerFunc(bot.GetEventDispather())
+	prompt := ` 我需要在当前目录下新建一个 ping.go，提供一个简单的 http ping 接口。 写完之后，帮我把代码用 git 提交一下。 `
 
-	http.HandleFunc("/webhook/event", handler)
+	terminalReporter := engine.NewTerminalReporter()
 
-	port := ":48000"
-	log.Printf("🚀 go-tiny-claw 飞书服务端已启动，正在监听 %s 端口\n", port)
-
-	err := http.ListenAndServe(port, nil)
+	err := eng.Run(context.Background(), prompt, terminalReporter)
 	if err != nil {
-		log.Fatal(err)
+		return
 	}
+
+	//bot := feishu.NewFeishuBot(eng)
+	//handler := httpserverext.NewEventHandlerFunc(bot.GetEventDispather())
+	//
+	//http.HandleFunc("/webhook/event", handler)
+	//
+	//port := ":48000"
+	//log.Printf("🚀 go-tiny-claw 飞书服务端已启动，正在监听 %s 端口\n", port)
+	//
+	//err := http.ListenAndServe(port, nil)
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
 }

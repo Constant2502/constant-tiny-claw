@@ -2,14 +2,19 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
+	"log"
 	"net/http"
 )
 
+type PingResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
 func pingHandler(w http.ResponseWriter, r *http.Request) {
-	response := map[string]interface{}{
-		"code":    200,
-		"message": "pong",
+	response := PingResponse{
+		Code:    200,
+		Message: "pong",
 	}
 	
 	w.Header().Set("Content-Type", "application/json")
@@ -20,10 +25,8 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	http.HandleFunc("/ping", pingHandler)
 	
-	fmt.Println("HTTP ping 服务器启动在 :8080 端口")
-	fmt.Println("访问 http://localhost:8080/ping 进行测试")
-	
+	log.Println("HTTP server starting on :8080...")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
-		fmt.Printf("服务器启动失败: %v\n", err)
+		log.Fatalf("服务器启动失败: %v", err)
 	}
 }
