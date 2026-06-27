@@ -3,13 +3,16 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 
 	"github.com/Constant2502/constant-tiny-claw/internal/engine"
+	"github.com/Constant2502/constant-tiny-claw/internal/feishu"
 	"github.com/Constant2502/constant-tiny-claw/internal/provider"
 	"github.com/Constant2502/constant-tiny-claw/internal/schema"
 	"github.com/Constant2502/constant-tiny-claw/internal/tools"
 	"github.com/joho/godotenv"
+	"github.com/larksuite/oapi-sdk-go/v3/core/httpserverext"
 )
 
 type mockProvider struct {
@@ -87,12 +90,15 @@ func main() {
 
 	eng := engine.NewAgentEngine(llmProvider, registry, workDir, false)
 
-	prompt := ` 我当前目录下有一个 server.go 文件。 
-				请帮我把里面 "TODO: 增加鉴权逻辑" 下面的那个 if 语句，
-				整个替换为： if user == nil { fmt.Println("Forbidden!") return } 
-				`
+	bot := feishu.NewFeishuBot(eng)
+	handler := httpserverext.NewEventHandlerFunc(bot.GetEventDispather())
 
-	err := eng.Run(context.Background(), prompt)
+	http.HandleFunc("/webhook/event", handler)
+
+	port := ":48000"
+	log.Printf("🚀 go-tiny-claw 飞书服务端已启动，正在监听 %s 端口\n", port)
+
+	err := http.ListenAndServe(port, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
