@@ -1,10 +1,14 @@
+// cmd/claw/main.go
 package main
 
 import (
 	"context"
 	"log"
 	"os"
+	"sync"
+	"time"
 
+	_ "github.com/Constant2502/constant-tiny-claw/internal/context"
 	"github.com/Constant2502/constant-tiny-claw/internal/engine"
 	"github.com/Constant2502/constant-tiny-claw/internal/provider"
 	"github.com/Constant2502/constant-tiny-claw/internal/schema"
@@ -12,100 +16,60 @@ import (
 	"github.com/joho/godotenv"
 )
 
-type mockProvider struct {
-	turn int
-}
-
-func (m *mockProvider) Generate(ctx context.Context, msgs []schema.Message, _ []schema.ToolDefinition) (*schema.Message, error) {
-	m.turn++
-	if m.turn == 1 {
-		return &schema.Message{
-			Role:    schema.RoleAssistant,
-			Content: "看看目录下有什么文件",
-			ToolCalls: []schema.ToolCall{
-				{ID: "call_123", Name: "bash", Arguments: []byte(`{"command": "ls -la"`)},
-			},
-		}, nil
-	}
-
-	return &schema.Message{
-		Role:    schema.RoleAssistant,
-		Content: "我看到了文件列表，里面有main.go, 任务完成！",
-	}, nil
-}
-
-type mockRegistry struct{}
-
-func (m *mockRegistry) GetAvailableTools() []schema.ToolDefinition {
-	return []schema.ToolDefinition{
-		{
-			Name:        "get_weather",
-			Description: "获取当前指定城市天气状况",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"city": map[string]interface{}{
-						"type": "string",
-					},
-				},
-				"required": []string{"city"},
-			},
-		},
-	}
-}
-
-func (m *mockRegistry) Execute(ctx context.Context, call schema.ToolCall) schema.ToolResult {
-	log.Printf(" -> [Mock工具执行]获取 %s 的天气中....\n", call.Name)
-	return schema.ToolResult{
-		ToolCallID: call.ID,
-		Output:     "API返回：今天是晴天气温二十五度。",
-		IsError:    false,
-	}
-}
-
 func main() {
-	_ = godotenv.Load()
+	_ = godotenv.Load(".env")
 	if os.Getenv("ZHIPU_API_KEY") == "" {
-		log.Fatal("请先导入智谱API的环境变量")
+		log.Fatal("请先导出 ZHIPU_API_KEY 环境变量")
 	}
 
-	workDir, _ := os.Getwd()
-
-	llmProvider := provider.NewZhipuOpenAIProvider("glm-4.5-air")
+	llmProvider := provider.NewZhipuOpenAIProvider("glm-4.5-air") // 智谱或 Claude
 
 	registry := tools.NewRegistry()
+	registry.Register(tools.NewReadFileTool("/tmp/project_front"))
 
-	readFileTool := tools.NewReadFileTool(workDir)
-	writeFileTool := tools.NewWriteFileTool(workDir)
-	bashTool := tools.NewBashTool(workDir)
-	editFileTool := tools.NewEditFileTool(workDir)
+	// 引擎本身变成无状态的，它不绑定 WorkDir（仅适用于本讲演示）
+	eng := engine.NewAgentEngine(llmProvider, registry, false)
+	reporter := engine.NewTerminalReporter()
 
-	registry.Register(readFileTool)
-	registry.Register(writeFileTool)
-	registry.Register(bashTool)
-	registry.Register(editFileTool)
+	var wg sync.WaitGroup
 
-	eng := engine.NewAgentEngine(llmProvider, registry, workDir, true)
+	// ================= 模拟并发场景 1：飞书前端群 =================
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 
-	prompt := ` 我需要在当前目录下新建一个 ping.go，提供一个简单的 http ping 接口。 写完之后，帮我把代码用 git 提交一下。 `
+		sessionA := engine.GlobalSessionMgr.GetOrCreate("chat_front_001", "/tmp/project_front")
 
-	terminalReporter := engine.NewTerminalReporter()
+		// 回合 1：获取机密
+		log.Println("\n>>> 🙋‍♂️ [Session A / Turn 1]: 帮我看看 README.md 里记录了什么密钥？")
+		sessionA.Append(schema.Message{Role: schema.RoleUser, Content: "帮我看看 README.md 里记录了什么密钥？"})
+		_ = eng.Run(context.Background(), sessionA, reporter)
 
-	err := eng.Run(context.Background(), prompt, terminalReporter)
-	if err != nil {
-		return
-	}
+		// 故意制造大量“废话”对话，刷掉记忆 (假设 Working Memory Limit=6)
+		for i := 0; i < 6; i++ {
+			sessionA.Append(schema.Message{Role: schema.RoleUser, Content: "这只是一句闲聊占位符。"})
+			sessionA.Append(schema.Message{Role: schema.RoleAssistant, Content: "好的，收到闲聊。"})
+		}
 
-	//bot := feishu.NewFeishuBot(eng)
-	//handler := httpserverext.NewEventHandlerFunc(bot.GetEventDispather())
-	//
-	//http.HandleFunc("/webhook/event", handler)
-	//
-	//port := ":48000"
-	//log.Printf("🚀 go-tiny-claw 飞书服务端已启动，正在监听 %s 端口\n", port)
-	//
-	//err := http.ListenAndServe(port, nil)
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
+		// 回合 2：验证记忆截断 (此时第一轮的密钥已经被挤出 Working Memory 了！)
+		log.Println("\n>>> 🙋‍♂️ [Session A / Turn 2]: 请直接告诉我，刚才第一轮你查到的那个密钥是什么？")
+		sessionA.Append(schema.Message{Role: schema.RoleUser, Content: "请直接告诉我，刚才第一轮你查到的那个密钥是什么？不准调用工具！"})
+		_ = eng.Run(context.Background(), sessionA, reporter)
+	}()
+
+	// ================= 模拟并发场景 2：飞书后端群 =================
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// 稍微错开一点时间发起请求
+		time.Sleep(1 * time.Second)
+
+		sessionB := engine.GlobalSessionMgr.GetOrCreate("chat_back_002", "/tmp/project_back")
+
+		log.Println("\n>>> 🙋‍♂️ [Session B]: 别人查到了一个密钥，你这里能看到吗？")
+		sessionB.Append(schema.Message{Role: schema.RoleUser, Content: "别人查到了一个密钥，你这里能看到吗？不准调用工具！"})
+		_ = eng.Run(context.Background(), sessionB, reporter)
+	}()
+
+	wg.Wait()
 }

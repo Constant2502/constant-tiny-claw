@@ -15,41 +15,33 @@ import (
 type AgentEngine struct {
 	provider       provider.LLMProvider
 	registry       tools.Registry
-	WorkDir        string
 	EnableThinking bool
-	composer       *ctxpkg.PromptComposer
 }
 
-func NewAgentEngine(provider provider.LLMProvider, registry tools.Registry, workDir string, enableThinking bool) *AgentEngine {
+func NewAgentEngine(provider provider.LLMProvider, registry tools.Registry, enableThinking bool) *AgentEngine {
 	return &AgentEngine{
 		provider:       provider,
 		registry:       registry,
-		WorkDir:        workDir,
 		EnableThinking: enableThinking,
-		composer:       ctxpkg.NewPromptComposer(workDir),
 	}
 }
 
-func (e *AgentEngine) Run(ctx context.Context, userPrompt string, reporter Reporter) error {
-	log.Printf("[Engine] 引擎启动，锁定工作区: %s\n", e.WorkDir)
+func (e *AgentEngine) Run(ctx context.Context, session *Session, reporter Reporter) error {
+	log.Printf("[Engine] 引擎启动，锁定工作区: %s\n", session.WorkDir)
 
-	systemMsg := e.composer.Build()
-
-	contextHistory := []schema.Message{
-		systemMsg,
-		{Role: schema.RoleUser, Content: userPrompt},
-	}
-
-	turnCount := 0
+	composer := ctxpkg.NewPromptComposer(session.WorkDir)
+	systemMsg := composer.Build()
 
 	for {
-		turnCount++
-		log.Printf("========== [Turn %d] 开始 ===========\n", turnCount)
-
-		//获取当前挂载的所有工具定义
 		availableTools := e.registry.GetAvailableTools()
 
-		//向大模型发起推理请求
+		//上下文组装: System prompt加截取最近的六条消息作为working memory
+		workingMemory := session.GetWorkingMemory(6)
+
+		var contextHistory []schema.Message
+		contextHistory = append(contextHistory, systemMsg)
+		contextHistory = append(contextHistory, workingMemory...)
+
 		if e.EnableThinking {
 			if reporter != nil {
 				reporter.OnThinking(ctx)
@@ -57,36 +49,32 @@ func (e *AgentEngine) Run(ctx context.Context, userPrompt string, reporter Repor
 
 			thinkResp, err := e.provider.Generate(ctx, contextHistory, nil)
 			if err != nil {
-				return fmt.Errorf("Thinking failed: %v", err)
+				return fmt.Errorf("thinking阶段失败: %w", err)
 			}
 
 			if thinkResp.Content != "" {
-				log.Printf("[内部思考 Trace] %s", thinkResp.Content)
+				session.Append(*thinkResp)
 				contextHistory = append(contextHistory, *thinkResp)
 			}
-
 		}
-		log.Printf("[Engine][Phase 2] 恢复工具挂载，等待模型行动...")
+
 		actionResp, err := e.provider.Generate(ctx, contextHistory, availableTools)
 		if err != nil {
-			return fmt.Errorf("Action阶段生成失败: %w", err)
+			return fmt.Errorf("action阶段失败: %w", err)
 		}
 
+		session.Append(*actionResp)
 		contextHistory = append(contextHistory, *actionResp)
 
 		if actionResp.Content != "" && reporter != nil {
 			reporter.OnMessage(ctx, actionResp.Content)
 		}
 
-		//退出条件判断：没有请求任何工具
 		if len(actionResp.ToolCalls) == 0 {
-			log.Printf("[Engine] 任务完成，退出循环")
 			break
 		}
 
 		observationMsgs := make([]schema.Message, len(actionResp.ToolCalls))
-
-		//2.声明WaitGroup用于阻塞等待所有协程完成。
 		var wg sync.WaitGroup
 
 		for i, toolCall := range actionResp.ToolCalls {
@@ -109,22 +97,17 @@ func (e *AgentEngine) Run(ctx context.Context, userPrompt string, reporter Repor
 					reporter.OnToolResult(ctx, call.Name, displayOutput, result.IsError)
 				}
 
-				obsMsg := schema.Message{
+				observationMsgs[idx] = schema.Message{
 					Role:       schema.RoleUser,
 					Content:    result.Output,
 					ToolCallID: call.ID,
 				}
-
-				observationMsgs[idx] = obsMsg
 			}(i, toolCall)
-		}
 
-		wg.Wait()
+			wg.Wait()
 
-		for _, obs := range observationMsgs {
-			contextHistory = append(contextHistory, obs)
+			session.Append(observationMsgs...)
 		}
 	}
-
 	return nil
 }
