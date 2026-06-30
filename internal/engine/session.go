@@ -47,8 +47,18 @@ func (s *Session) GetWorkingMemory(limit int) []schema.Message {
 		return res
 	}
 
-	res := make([]schema.Message, limit)
-	copy(res, s.history[total-limit:])
+	start := total - limit
+	for i := total - 1; i >= 0; i-- {
+		if s.history[i].Role == schema.RoleUser && s.history[i].ToolCallID == "" {
+			if i < start {
+				start = i
+			}
+			break
+		}
+	}
+
+	res := make([]schema.Message, total-start)
+	copy(res, s.history[start:])
 
 	for len(res) > 0 {
 		if res[0].Role == schema.RoleUser && res[0].ToolCallID != "" {

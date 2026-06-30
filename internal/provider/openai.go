@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/Constant2502/constant-tiny-claw/internal/schema"
@@ -54,25 +55,27 @@ func (p *OpenAIProvider) Generate(ctx context.Context, msgs []schema.Message, av
 				astParam.Content = openai.ChatCompletionAssistantMessageParamContentUnion{
 					OfString: openai.String(msg.Content),
 				}
+			}
 
-				//如果历史包含ToolCall， 必须原样放回，以维护大模型的逻辑链
-				if len(msg.ToolCalls) > 0 {
-					var toolCalls []openai.ChatCompletionMessageToolCallUnionParam
-					for _, tc := range msg.ToolCalls {
-						toolCalls = append(toolCalls, openai.ChatCompletionMessageToolCallUnionParam{
-							OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-								ID:   tc.ID,
-								Type: "function",
-								Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
-									Name:      tc.Name,
-									Arguments: string(tc.Arguments),
-								},
+			// 如果历史包含 ToolCall，必须原样放回，以维护大模型的逻辑链。
+			if len(msg.ToolCalls) > 0 {
+				var toolCalls []openai.ChatCompletionMessageToolCallUnionParam
+				for _, tc := range msg.ToolCalls {
+					toolCalls = append(toolCalls, openai.ChatCompletionMessageToolCallUnionParam{
+						OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+							ID:   tc.ID,
+							Type: "function",
+							Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+								Name:      tc.Name,
+								Arguments: string(tc.Arguments),
 							},
-						})
-					}
-					astParam.ToolCalls = toolCalls
+						},
+					})
 				}
+				astParam.ToolCalls = toolCalls
+			}
 
+			if msg.Content != "" || len(msg.ToolCalls) > 0 {
 				openaiMsgs = append(openaiMsgs, openai.ChatCompletionMessageParamUnion{
 					OfAssistant: &astParam,
 				})
@@ -112,6 +115,9 @@ func (p *OpenAIProvider) Generate(ctx context.Context, msgs []schema.Message, av
 	if len(openaiTools) > 0 {
 		params.Tools = openaiTools
 	}
+
+	debugParams, _ := json.Marshal(params)
+	log.Printf("[DEBUG] 请求参数: %s\n", string(debugParams))
 
 	resp, err := p.client.Chat.Completions.New(ctx, params)
 	if err != nil {

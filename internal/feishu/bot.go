@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Constant2502/constant-tiny-claw/internal/engine"
+	"github.com/Constant2502/constant-tiny-claw/internal/schema"
 	"github.com/joho/godotenv"
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
@@ -28,7 +29,7 @@ func NewFeishuBot(eng *engine.AgentEngine) *FeishuBot {
 	appSecret := os.Getenv("FEISHU_APP_SECRET")
 
 	if appID == "" || appSecret == "" {
-		log.Fatalf("Feishu appID or appSecret is empty")
+		log.Fatalf("飞书应用 ID 或应用密钥为空")
 	}
 
 	client := lark.NewClient(appID, appSecret)
@@ -72,10 +73,19 @@ func (b *FeishuBot) handleAgentRun(chatId string, prompt string) {
 		chatId: chatId,
 	}
 
-	//启动引擎
-	err := b.engine.Run(context.Background(), prompt, reporter)
+	workDir, err := os.Getwd()
 	if err != nil {
-		reporter.sendMsg(fmt.Sprintf("❌Agent 运行崩溃: %s", err.Error()))
+		reporter.sendMsg(fmt.Sprintf("获取当前工作目录失败: %s", err.Error()))
+		return
+	}
+
+	session := engine.GlobalSessionMgr.GetOrCreate(chatId, workDir)
+	session.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
+
+	//启动引擎
+	err = b.engine.Run(context.Background(), session, reporter)
+	if err != nil {
+		reporter.sendMsg(fmt.Sprintf("智能体运行崩溃: %s", err.Error()))
 	}
 }
 
@@ -106,7 +116,11 @@ func (r *FeishuReporter) sendMsg(text string) {
 	if err != nil {
 		log.Printf("[Feishu] ❌ 发送消息失败: %v\n", err)
 	} else {
-		log.Printf("[Feishu] ✅ 消息已发送, msgId=%s\n", resp.Data.MessageId)
+		msgID := ""
+		if resp != nil && resp.Data != nil && resp.Data.MessageId != nil {
+			msgID = *resp.Data.MessageId
+		}
+		log.Printf("[Feishu] ✅ 消息已发送, msgId=%s\n", msgID)
 	}
 }
 

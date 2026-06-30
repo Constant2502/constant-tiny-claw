@@ -31,8 +31,10 @@ func (t *ReadFileTool) Definition() schema.ToolDefinition {
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"type":        "string",
-				"description": "要读取的文件路径,如 cmd/claw/main.go",
+				"path": map[string]interface{}{
+					"type":        "string",
+					"description": "要读取的文件路径,如 cmd/claw/main.go",
+				},
 			},
 			"required": []string{"path"},
 		},

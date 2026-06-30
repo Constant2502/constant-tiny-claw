@@ -63,12 +63,12 @@ func fuzzyReplace(originalContext, oldText, newText string) (string, error) {
 		return strings.Replace(originalContext, oldText, newText, 1), nil
 	}
 	if count > 1 {
-		return "", fmt.Errorf("old_text匹配到了%处, 提供更多的上下文代码。")
+		return "", fmt.Errorf("old_text匹配到了%d处，请提供更多的上下文代码", count)
 	}
 
 	// L2:换行符规一化(统一将\r\n转换为\n）
 	normalizedContent := strings.ReplaceAll(originalContext, "\r\n", "\n")
-	normalizedOld := strings.ReplaceAll(originalContext, "\r\n", "\n")
+	normalizedOld := strings.ReplaceAll(oldText, "\r\n", "\n")
 
 	count = strings.Count(normalizedContent, normalizedOld)
 	if count == 1 {

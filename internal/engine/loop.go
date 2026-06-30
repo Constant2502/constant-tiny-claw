@@ -16,6 +16,8 @@ type AgentEngine struct {
 	provider       provider.LLMProvider
 	registry       tools.Registry
 	EnableThinking bool
+	composer       *ctxpkg.PromptComposer
+	compactor      *ctxpkg.Compactor
 }
 
 func NewAgentEngine(provider provider.LLMProvider, registry tools.Registry, enableThinking bool) *AgentEngine {
@@ -23,6 +25,8 @@ func NewAgentEngine(provider provider.LLMProvider, registry tools.Registry, enab
 		provider:       provider,
 		registry:       registry,
 		EnableThinking: enableThinking,
+		composer:       ctxpkg.NewPromptComposer("."),
+		compactor:      ctxpkg.NewCompactor(3000, 6),
 	}
 }
 
@@ -42,29 +46,31 @@ func (e *AgentEngine) Run(ctx context.Context, session *Session, reporter Report
 		contextHistory = append(contextHistory, systemMsg)
 		contextHistory = append(contextHistory, workingMemory...)
 
+		compactedContext := e.compactor.Compact(contextHistory)
+
 		if e.EnableThinking {
 			if reporter != nil {
 				reporter.OnThinking(ctx)
 			}
 
-			thinkResp, err := e.provider.Generate(ctx, contextHistory, nil)
+			thinkResp, err := e.provider.Generate(ctx, compactedContext, nil)
 			if err != nil {
 				return fmt.Errorf("thinking阶段失败: %w", err)
 			}
 
 			if thinkResp.Content != "" {
 				session.Append(*thinkResp)
-				contextHistory = append(contextHistory, *thinkResp)
+				contextHistory = append(compactedContext, *thinkResp)
 			}
 		}
 
-		actionResp, err := e.provider.Generate(ctx, contextHistory, availableTools)
+		actionResp, err := e.provider.Generate(ctx, compactedContext, availableTools)
 		if err != nil {
 			return fmt.Errorf("action阶段失败: %w", err)
 		}
 
 		session.Append(*actionResp)
-		contextHistory = append(contextHistory, *actionResp)
+		compactedContext = append(compactedContext, *actionResp)
 
 		if actionResp.Content != "" && reporter != nil {
 			reporter.OnMessage(ctx, actionResp.Content)
@@ -103,11 +109,9 @@ func (e *AgentEngine) Run(ctx context.Context, session *Session, reporter Report
 					ToolCallID: call.ID,
 				}
 			}(i, toolCall)
-
-			wg.Wait()
-
-			session.Append(observationMsgs...)
 		}
+		wg.Wait()
+		session.Append(observationMsgs...)
 	}
 	return nil
 }

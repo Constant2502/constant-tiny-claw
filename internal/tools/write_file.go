@@ -39,8 +39,8 @@ func (t *WriteFileTool) Definition() schema.ToolDefinition {
 					"type":        "string",
 					"description": "要写入的完整文件内容",
 				},
-				"required": []string{"path", "content"},
 			},
+			"required": []string{"path", "content"},
 		},
 	}
 }
